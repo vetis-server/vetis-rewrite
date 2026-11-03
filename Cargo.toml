@@ -1,0 +1,54 @@
+[package]
+name = "vetis-rewrite"
+version = "0.1.0-beta.1"
+edition = "2024"
+authors = ["Rogerio Araújo <rogerio.araujo@gmail.com>"]
+repository = "https://github.com/vetis-server/vetis-ws"
+homepage = "https://github.com/vetis-server/vetis"
+description = "Very Tiny Server request rewrite support"
+readme = "README.md"
+license = "MIT OR Apache-2.0"
+keywords = ["http", "modules", "rewrite", "vetis"]
+publish = true
+rust-version = "1.86.0"
+
+[features]
+default = []
+
+[dependencies]
+base64 = "0.23.1"
+http = "1.5.0"
+hyper = { version = "1.12.0", default-features = false, features = [
+    "http1",
+    "server",
+] }
+hyper-util = { version = "0.1.21", default-features = false, features = [
+    "server",
+    "http1",
+    "tokio",
+] }
+regex = "1.13.1"
+serde = "1.0.228"
+typetag = "0.2.22"
+tokio = { version = "1.54.1", optional = true }
+vetis = { version = "0.1.7-beta.6" }
+
+[dev-dependencies]
+caramelo = "0.1.5"
+deboa = { version = "0.1.5-beta.7" }
+deboa-tokio = { version = "0.1.4-beta.8", default-features = false, features = [
+    "http2",
+    "rust-tls",
+    "default-rustls-provider",
+    "default-rustls-verifier",
+] }
+deboa-ws = { version = "0.1.0-beta.5" }
+serde_yaml_ng = "0.10.0"
+tokio = { version = "1.54.1", default-features = false, features = ["macros"] }
+vetis-flash = "0.1.0-beta.1"
+vetis-tokio = { version = "0.1.2-beta.8", features = ["rust-tls"] }
+
+[patch.crates-io]
+vetis = { path = "../vetis/vetis" }
+vetis-flash = { path = "../vetis-flash" }
+vetis-tokio = { path = "../vetis-tokio" }
