@@ -4,9 +4,15 @@
 
 vetis-rewrite adds diffent rewrite types for your host path, choose the most appropriate one for your usecase!
 
-## Features
+## Available rewrite hooks
 
-- basic
+- query
+- regex
+- replace
+- req_headers
+- res_headers
+- strip_prefix
+- strip_suffix
 
 ## Installation
 
@@ -27,24 +33,27 @@ on vetis.
 #### Using API
 
 ```rust,ignore
-use vetis_log::StdoutLogConfig;
-use log::Level;
+use vetis_rewriten ::basic::HookConfig as BasicAuthHookConfig;
 
-let config = StdoutLogConfig::builder()
-    .log_leve(Level::Info)
+let config = BasicAuthHookConfig::builder()
     .build()?;
 ```
 
 #### vetis.yaml
 
 ```yaml
-dest: stdout
-log_level: "INFO"
+- name: "regex_rewrite"
+  matcher:
+    type: "path"
+    paths:
+      - "/hello/world*"
+  target: "/(hello*)/(world*)"
+  replacement: "/$2/$1"
 ```
 
 #### Configuration Options
 
-- **log_level**: Log level: TRACE, WARN, DEBUG, INFO, ERROR and FATAL
+- **matcher**: If set, this hook will be only called if request meet the criteria defined by him, otherwise, all requests will call this hook (optional)
 
 ### Runtime Features
 
