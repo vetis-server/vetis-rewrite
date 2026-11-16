@@ -2,7 +2,7 @@
 use serde::Deserialize;
 use vetis_tokio::ServerConfig;
 
-pub(crate) const CA_CERT: &str = "certs/ca.der";
+pub(crate) const CA_CERT: &str = "files/certs/ca.der";
 
 #[allow(unused)]
 #[derive(Deserialize, Clone)]

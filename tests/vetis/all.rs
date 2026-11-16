@@ -20,7 +20,7 @@ use vetis_tokio::Vetis;
 
 #[tokio::test]
 async fn test_from_file() -> VetisTestResult<()> {
-    let config_path = Path::new("files/vetis-rewrite.yaml");
+    let config_path = Path::new("files/public/vetis-rewrite.yaml");
     expect(config_path.exists()).to_be(truthy());
 
     let file = read_to_string(&config_path)
