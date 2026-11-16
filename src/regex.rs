@@ -11,15 +11,14 @@ use vetis::{
     matcher::{Matcher, MatcherConfig},
 };
 
-/// A builder for creating a `HookConfig`.
-pub struct HookConfigBuilder {
+/// A builder for creating a `RewriteHookConfig`.
+pub struct HookConfigBuilder<'a> {
     matcher: Option<Box<dyn MatcherConfig>>,
-    target: Str,
-    replacement: Str,
-    limit: Option<usize>,
+    target: &'a str,
+    replacement: &'a str,
 }
 
-impl HookConfigBuilder {
+impl<'a> HookConfigBuilder<'a> {
     /// Allow set a matcher
     ///
     /// # Returns
@@ -38,8 +37,8 @@ impl HookConfigBuilder {
     /// # Returns
     ///
     /// * `Self` - The builder.
-    pub fn target(mut self, target: &str) -> Self {
-        self.target = target.into();
+    pub fn target(mut self, target: &'a str) -> Self {
+        self.target = target;
         self
     }
 
@@ -48,18 +47,8 @@ impl HookConfigBuilder {
     /// # Returns
     ///
     /// * `Self` - The builder.
-    pub fn replacement(mut self, replacement: &str) -> Self {
-        self.replacement = replacement.into();
-        self
-    }
-
-    /// Allow set a limit
-    ///
-    /// # Returns
-    ///
-    /// * `Self` - The builder.
-    pub fn limit(mut self, limit: usize) -> Self {
-        self.limit = Some(limit);
+    pub fn replacement(mut self, replacement: &'a str) -> Self {
+        self.replacement = replacement;
         self
     }
 
@@ -73,9 +62,12 @@ impl HookConfigBuilder {
             matcher: self
                 .matcher
                 .map_or(None, |val| Some(val)),
-            target: self.target,
-            replacement: self.replacement,
-            limit: self.limit,
+            target: self
+                .target
+                .to_compact_string(),
+            replacement: self
+                .replacement
+                .to_compact_string(),
         })
     }
 }
@@ -85,14 +77,14 @@ impl HookConfigBuilder {
 ///
 /// # Fields
 ///
-/// * `pattern` - Target uri to regex to matchw with.
-/// * `replacement` - The replacement uri.
+/// * `target` - A regex pattern to match uri against to.
+/// * `replacement` - The uri replacement.
 ///
 /// # Examples
 ///
 /// ```rust,no_run
 /// use std::collections::HashMap;
-/// use vetis_rewrite::replace::HookConfig;
+/// use vetis_rewrite::{regex::HookConfig};
 ///
 /// let auth = HookConfig::builder()
 ///     .target(r"/(hello*)/(world*)")
@@ -103,10 +95,9 @@ pub struct HookConfig {
     matcher: Option<Box<dyn MatcherConfig>>,
     target: Str,
     replacement: Str,
-    limit: Option<usize>,
 }
 
-#[typetag::serde(name = "path_replace")]
+#[typetag::serde(name = "regex_rewrite")]
 impl vetis::hook::HookConfig for HookConfig {
     fn matcher(&self) -> Option<&Box<dyn MatcherConfig>> {
         self.matcher
@@ -118,7 +109,7 @@ impl vetis::hook::HookConfig for HookConfig {
     }
 
     fn boxed_hook(&self) -> Box<dyn VetisHook> {
-        Box::new(HookReplaceHook::new(self.clone()))
+        Box::new(RegexHook::new(self.clone()))
     }
 }
 
@@ -128,20 +119,15 @@ impl HookConfig {
     /// # Returns
     ///
     /// * `HookConfigBuilder` - The builder.
-    pub fn builder() -> HookConfigBuilder {
-        HookConfigBuilder {
-            matcher: None,
-            target: "/service".into(),
-            replacement: "/api".into(),
-            limit: None,
-        }
+    pub fn builder<'a>() -> HookConfigBuilder<'a> {
+        HookConfigBuilder { matcher: None, target: "/api", replacement: "/api.php?action=$1" }
     }
 
     /// Return match pattern
     ///
     /// # Returns
     ///
-    /// * `&String` - Rewrite mode.
+    /// * `&str` - Rewrite mode.
     pub fn target(&self) -> &str {
         &self.target
     }
@@ -150,33 +136,23 @@ impl HookConfig {
     ///
     /// # Returns
     ///
-    /// * `&String` - Rewrite mode.
+    /// * `&str` - Rewrite mode.
     pub fn replacement(&self) -> &str {
         &self.replacement
     }
-
-    /// Return replacement limit
-    ///
-    /// # Returns
-    ///
-    /// * `u8` - Rewrite mode.
-    pub fn limit(&self) -> Option<usize> {
-        self.limit
-    }
 }
 
-/// HookReplaceHook allow replace uri
-pub struct HookReplaceHook {
+/// RegexHook allow rewrite uri using regex
+pub struct RegexHook {
     matcher: Option<Box<dyn Matcher>>,
     target: Regex,
     replacement: Str,
-    limit: usize,
 }
 
-unsafe impl Send for HookReplaceHook {}
-unsafe impl Sync for HookReplaceHook {}
+unsafe impl Send for RegexHook {}
+unsafe impl Sync for RegexHook {}
 
-impl HookReplaceHook {
+impl RegexHook {
     /// Build a new RegexHook out of its configuration
     pub fn new(config: HookConfig) -> Self {
         let target = Regex::new(&config.target).expect("Invalid target regex pattern");
@@ -185,18 +161,11 @@ impl HookReplaceHook {
         } else {
             None
         };
-        Self {
-            matcher,
-            target,
-            replacement: config.replacement,
-            limit: config
-                .limit
-                .unwrap_or(1 as usize),
-        }
+        Self { matcher, target, replacement: config.replacement }
     }
 }
 
-impl Hook for HookReplaceHook {
+impl Hook for RegexHook {
     fn has_matches(&self, context: &Context) -> bool {
         if let Some(matcher) = &self.matcher { matcher.is_match(context) } else { true }
     }
@@ -218,13 +187,13 @@ impl Hook for HookReplaceHook {
         let future = async move {
             let source_uri = request.uri_mut();
 
-            let replacement_uri = self
+            let target_uri = self
                 .replacement
                 .clone();
 
             let replaced_uri = self
                 .target
-                .replacen(&source_uri.to_string(), self.limit, replacement_uri.to_string())
+                .replace_all(&source_uri.to_string(), target_uri.to_string())
                 .to_string();
 
             *source_uri = Uri::from_str(&replaced_uri)

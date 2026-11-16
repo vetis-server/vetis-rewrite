@@ -11,13 +11,14 @@ use vetis::{
     matcher::{Matcher, MatcherConfig},
 };
 
-/// A builder for creating a `HookConfig`.
-pub struct HookConfigBuilder {
+/// A builder for creating a `RewriteHookConfig`.
+pub struct HookConfigBuilder<'a> {
     matcher: Option<Box<dyn MatcherConfig>>,
-    target: Str,
+    target: &'a str,
+    replacement: &'a str,
 }
 
-impl HookConfigBuilder {
+impl<'a> HookConfigBuilder<'a> {
     /// Allow set a matcher
     ///
     /// # Returns
@@ -36,8 +37,18 @@ impl HookConfigBuilder {
     /// # Returns
     ///
     /// * `Self` - The builder.
-    pub fn target(mut self, target: &str) -> Self {
-        self.target = target.into();
+    pub fn target(mut self, target: &'a str) -> Self {
+        self.target = target;
+        self
+    }
+
+    /// Allow set a replacement
+    ///
+    /// # Returns
+    ///
+    /// * `Self` - The builder.
+    pub fn replacement(mut self, replacement: &'a str) -> Self {
+        self.replacement = replacement;
         self
     }
 
@@ -51,7 +62,12 @@ impl HookConfigBuilder {
             matcher: self
                 .matcher
                 .map_or(None, |val| Some(val)),
-            target: self.target,
+            target: self
+                .target
+                .to_compact_string(),
+            replacement: self
+                .replacement
+                .to_compact_string(),
         })
     }
 }
@@ -61,25 +77,27 @@ impl HookConfigBuilder {
 ///
 /// # Fields
 ///
-/// * `pattern` - Target uri to regex to matchw with.
-/// * `replacement` - The replacement uri.
+/// * `target` - A regex pattern to match uri against to.
+/// * `replacement` - The uri replacement.
 ///
 /// # Examples
 ///
 /// ```rust,no_run
 /// use std::collections::HashMap;
-/// use vetis_rewrite::strip_prefix::HookConfig;
+/// use vetis_rewrite::{regex::HookConfig};
 ///
 /// let auth = HookConfig::builder()
-///     .target("/home")
+///     .target(r"/(hello*)/(world*)")
+///     .replacement("/$2/$1")
 ///     .build();
 /// ```
 pub struct HookConfig {
     matcher: Option<Box<dyn MatcherConfig>>,
     target: Str,
+    replacement: Str,
 }
 
-#[typetag::serde(name = "strip_prefix")]
+#[typetag::serde(name = "query_rewrite")]
 impl vetis::hook::HookConfig for HookConfig {
     fn matcher(&self) -> Option<&Box<dyn MatcherConfig>> {
         self.matcher
@@ -91,7 +109,7 @@ impl vetis::hook::HookConfig for HookConfig {
     }
 
     fn boxed_hook(&self) -> Box<dyn VetisHook> {
-        Box::new(StripPrefixHook::new(self.clone()))
+        Box::new(QueryHook::new(self.clone()))
     }
 }
 
@@ -101,30 +119,40 @@ impl HookConfig {
     /// # Returns
     ///
     /// * `HookConfigBuilder` - The builder.
-    pub fn builder() -> HookConfigBuilder {
-        HookConfigBuilder { matcher: None, target: "/api".into() }
+    pub fn builder<'a>() -> HookConfigBuilder<'a> {
+        HookConfigBuilder { matcher: None, target: "/api", replacement: "/api.php?action=$1" }
     }
 
     /// Return match pattern
     ///
     /// # Returns
     ///
-    /// * `&String` - Rewrite mode.
+    /// * `&str` - Rewrite mode.
     pub fn target(&self) -> &str {
         &self.target
     }
+
+    /// Return replacement expression
+    ///
+    /// # Returns
+    ///
+    /// * `&str` - Rewrite mode.
+    pub fn replacement(&self) -> &str {
+        &self.replacement
+    }
 }
 
-/// HookReplaceHook allow replace uri
-pub struct StripPrefixHook {
+/// RegexHook allow rewrite uri using regex
+pub struct QueryHook {
     matcher: Option<Box<dyn Matcher>>,
     target: Regex,
+    replacement: Str,
 }
 
-unsafe impl Send for StripPrefixHook {}
-unsafe impl Sync for StripPrefixHook {}
+unsafe impl Send for QueryHook {}
+unsafe impl Sync for QueryHook {}
 
-impl StripPrefixHook {
+impl QueryHook {
     /// Build a new RegexHook out of its configuration
     pub fn new(config: HookConfig) -> Self {
         let target = Regex::new(&config.target).expect("Invalid target regex pattern");
@@ -133,11 +161,11 @@ impl StripPrefixHook {
         } else {
             None
         };
-        Self { matcher, target }
+        Self { matcher, target, replacement: config.replacement }
     }
 }
 
-impl Hook for StripPrefixHook {
+impl Hook for QueryHook {
     fn has_matches(&self, context: &Context) -> bool {
         if let Some(matcher) = &self.matcher { matcher.is_match(context) } else { true }
     }
@@ -159,9 +187,13 @@ impl Hook for StripPrefixHook {
         let future = async move {
             let source_uri = request.uri_mut();
 
+            let target_uri = self
+                .replacement
+                .clone();
+
             let replaced_uri = self
                 .target
-                .replace_all(&source_uri.to_string(), String::new())
+                .replace_all(&source_uri.to_string(), target_uri.to_string())
                 .to_string();
 
             *source_uri = Uri::from_str(&replaced_uri)

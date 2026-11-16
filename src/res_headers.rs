@@ -1,44 +1,27 @@
 use cel::Context;
 use compact_str::ToCompactString;
-use http::Uri;
-use regex::Regex;
 use serde::{Deserialize, Serialize};
-use std::str::FromStr;
 use vetis::{
     Request, Response, Str, VetisFutureResult, VetisHook, VetisResult,
-    errors::VetisError,
     hook::{Hook, HookPhase},
     matcher::{Matcher, MatcherConfig},
 };
 
-/// A builder for creating a `RewriteHookConfig`.
-pub struct HookConfigBuilder {
+/// A builder for creating a `RewriteModuleConfig`.
+pub struct HookConfigBuilder<'a> {
     matcher: Option<Box<dyn MatcherConfig>>,
-    target: Str,
-    replacement: Str,
+    pattern: &'a str,
+    replacement: &'a str,
 }
 
-impl HookConfigBuilder {
-    /// Allow set a matcher
+impl<'a> HookConfigBuilder<'a> {
+    /// Allow set a pattern
     ///
     /// # Returns
     ///
     /// * `Self` - The builder.
-    pub fn add_matcher<M>(mut self, matcher: M) -> Self
-    where
-        M: MatcherConfig + Send + Sync + 'static,
-    {
-        self.matcher = Some(Box::new(matcher));
-        self
-    }
-
-    /// Allow set a target
-    ///
-    /// # Returns
-    ///
-    /// * `Self` - The builder.
-    pub fn target(mut self, target: &str) -> Self {
-        self.target = target.to_compact_string();
+    pub fn pattern(mut self, pattern: &'a str) -> Self {
+        self.pattern = pattern;
         self
     }
 
@@ -47,8 +30,8 @@ impl HookConfigBuilder {
     /// # Returns
     ///
     /// * `Self` - The builder.
-    pub fn replacement(mut self, replacement: &str) -> Self {
-        self.replacement = replacement.to_compact_string();
+    pub fn replacement(mut self, replacement: &'a str) -> Self {
+        self.replacement = replacement;
         self
     }
 
@@ -62,38 +45,42 @@ impl HookConfigBuilder {
             matcher: self
                 .matcher
                 .map_or(None, |val| Some(val)),
-            target: self.target,
-            replacement: self.replacement,
+            pattern: self
+                .pattern
+                .to_compact_string(),
+            replacement: self
+                .replacement
+                .to_compact_string(),
         })
     }
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-/// A struct with regex rewrite configuration.
+/// A struct with basic authentication configuration.
 ///
 /// # Fields
 ///
-/// * `target` - A regex pattern to match uri against to.
-/// * `replacement` - The uri replacement.
+/// * `users` - A map of username to hashed password.
+/// * `algorithm` - The algorithm used for password hashing.
+/// * `htpasswd` - The path to the htpasswd file.
 ///
 /// # Examples
 ///
 /// ```rust,no_run
 /// use std::collections::HashMap;
-/// use vetis_rewrite::{regex::HookConfig};
+/// use vetis_rewrite::{RewriteMode, RegexRewriteConfig};
 ///
-/// let auth = HookConfig::builder()
-///     .target(r"/(hello*)/(world*)")
-///     .replacement("/$2/$1")
+/// let auth = RegexRewriteConfig::builder()
+///     .mode(RewriteModel::Regex)
 ///     .build();
 /// ```
 pub struct HookConfig {
     matcher: Option<Box<dyn MatcherConfig>>,
-    target: Str,
+    pattern: Str,
     replacement: Str,
 }
 
-#[typetag::serde(name = "regex_rewrite")]
+#[typetag::serde(name = "res_headers_rewrite")]
 impl vetis::hook::HookConfig for HookConfig {
     fn matcher(&self) -> Option<&Box<dyn MatcherConfig>> {
         self.matcher
@@ -105,7 +92,7 @@ impl vetis::hook::HookConfig for HookConfig {
     }
 
     fn boxed_hook(&self) -> Box<dyn VetisHook> {
-        Box::new(RegexHook::new(self.clone()))
+        Box::new(ResHeaderHook::new(self.clone()))
     }
 }
 
@@ -115,11 +102,11 @@ impl HookConfig {
     /// # Returns
     ///
     /// * `HookConfigBuilder` - The builder.
-    pub fn builder() -> HookConfigBuilder {
+    pub fn builder<'a>() -> HookConfigBuilder<'a> {
         HookConfigBuilder {
             matcher: None,
-            target: "/api".into(),
-            replacement: "/api.php?action=$1".into(),
+            pattern: "/api/([a-z]*)",
+            replacement: "/api.php?action=$1",
         }
     }
 
@@ -128,8 +115,8 @@ impl HookConfig {
     /// # Returns
     ///
     /// * `&String` - Rewrite mode.
-    pub fn target(&self) -> &str {
-        &self.target
+    pub fn pattern(&self) -> &str {
+        &self.pattern
     }
 
     /// Return replacement expression
@@ -142,30 +129,29 @@ impl HookConfig {
     }
 }
 
-/// RegexHook allow rewrite uri using regex
-pub struct RegexHook {
+/// ResHeaderHook allow rewrite uri using regex
+pub struct ResHeaderHook {
     matcher: Option<Box<dyn Matcher>>,
-    target: Regex,
-    replacement: Str,
+    #[allow(dead_code)]
+    config: HookConfig,
 }
 
-unsafe impl Send for RegexHook {}
-unsafe impl Sync for RegexHook {}
+unsafe impl Send for ResHeaderHook {}
+unsafe impl Sync for ResHeaderHook {}
 
-impl RegexHook {
+impl ResHeaderHook {
     /// Build a new RegexHook out of its configuration
     pub fn new(config: HookConfig) -> Self {
-        let target = Regex::new(&config.target).expect("Invalid target regex pattern");
-        let matcher = if let Some(matcher_config) = config.matcher {
+        let matcher = if let Some(matcher_config) = &config.matcher {
             Some(matcher_config.boxed_matcher())
         } else {
             None
         };
-        Self { matcher, target, replacement: config.replacement }
+        Self { matcher, config }
     }
 }
 
-impl Hook for RegexHook {
+impl Hook for ResHeaderHook {
     fn has_matches(&self, context: &Context) -> bool {
         if let Some(matcher) = &self.matcher { matcher.is_match(context) } else { true }
     }
@@ -181,23 +167,13 @@ impl Hook for RegexHook {
 
     fn handle<'a>(
         &'a self,
-        mut request: Request,
+        request: Request,
         response: Option<Response>,
     ) -> VetisFutureResult<'a, (Request, Option<Response>)> {
         let future = async move {
-            let source_uri = request.uri_mut();
-
-            let target_uri = self
-                .replacement
+            let _source_uri = request
+                .uri()
                 .clone();
-
-            let replaced_uri = self
-                .target
-                .replace_all(&source_uri.to_string(), target_uri.to_string())
-                .to_string();
-
-            *source_uri = Uri::from_str(&replaced_uri)
-                .map_err(|e| VetisError::hook(e.to_compact_string()))?;
 
             Ok((request, response))
         };

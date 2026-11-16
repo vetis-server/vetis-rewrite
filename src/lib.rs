@@ -1,13 +1,19 @@
 #![doc = include_str!("../README.md")]
 #![deny(missing_docs)]
 
-/// Regex based url rewrite
+/// Query rewrite module
+pub mod query;
+/// Regex rewrite module
 pub mod regex;
-/// Replace url write
+/// Replace rewrite module
 pub mod replace;
-/// Strip prefix uri rewrite
+/// Replace req_headers module
+pub mod req_headers;
+/// Replace res_headers module
+pub mod res_headers;
+/// Strip prefix rewrite module
 pub mod strip_prefix;
-/// Strip suffix uri rewrite
+/// Strip suffix rewrite module
 pub mod strip_suffix;
 #[cfg(test)]
 mod tests;

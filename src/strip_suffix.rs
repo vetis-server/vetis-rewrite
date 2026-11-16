@@ -12,12 +12,12 @@ use vetis::{
 };
 
 /// A builder for creating a `HookConfig`.
-pub struct HookConfigBuilder {
+pub struct HookConfigBuilder<'a> {
     matcher: Option<Box<dyn MatcherConfig>>,
-    target: Str,
+    target: &'a str,
 }
 
-impl HookConfigBuilder {
+impl<'a> HookConfigBuilder<'a> {
     /// Allow set a matcher
     ///
     /// # Returns
@@ -36,8 +36,8 @@ impl HookConfigBuilder {
     /// # Returns
     ///
     /// * `Self` - The builder.
-    pub fn target(mut self, target: &str) -> Self {
-        self.target = target.into();
+    pub fn target(mut self, target: &'a str) -> Self {
+        self.target = target;
         self
     }
 
@@ -51,7 +51,9 @@ impl HookConfigBuilder {
             matcher: self
                 .matcher
                 .map_or(None, |val| Some(val)),
-            target: self.target,
+            target: self
+                .target
+                .to_compact_string(),
         })
     }
 }
@@ -100,8 +102,8 @@ impl HookConfig {
     /// # Returns
     ///
     /// * `HookConfigBuilder` - The builder.
-    pub fn builder() -> HookConfigBuilder {
-        HookConfigBuilder { matcher: None, target: "/api".into() }
+    pub fn builder<'a>() -> HookConfigBuilder<'a> {
+        HookConfigBuilder { matcher: None, target: "/api" }
     }
 
     /// Return match pattern
