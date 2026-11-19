@@ -1,9 +1,10 @@
 use cel::Context;
 use compact_str::ToCompactString;
+
 use serde::{Deserialize, Serialize};
 use vetis::{
     Request, Response, Str, VetisFutureResult, VetisHook, VetisResult,
-    hook::{Hook, HookPhase},
+    hook::{Hook, HookPhase, HookPhases},
     matcher::{Matcher, MatcherConfig},
 };
 
@@ -156,8 +157,8 @@ impl Hook for ResHeaderHook {
         if let Some(matcher) = &self.matcher { matcher.is_match(context) } else { true }
     }
 
-    fn phase(&self) -> &HookPhase {
-        &HookPhase::Rewrite
+    fn phases(&self) -> HookPhases {
+        HookPhases::new(HookPhase::Rewrite)
     }
 
     fn matcher_mut(&mut self) -> Option<&mut Box<dyn Matcher>> {

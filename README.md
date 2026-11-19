@@ -42,13 +42,13 @@ let config = BasicAuthHookConfig::builder()
 #### vetis.yaml
 
 ```yaml
-- name: "regex_rewrite"
-  matcher:
-    type: "path"
-    paths:
-      - "/hello/world*"
-  target: "/(hello*)/(world*)"
-  replacement: "/$2/$1"
+name: "regex_rewrite"
+matcher:
+  type: "path"
+  paths:
+    - "/hello/world*"
+target: "/(hello*)/(world*)"
+replacement: "/$2/$1"
 ```
 
 #### Configuration Options
