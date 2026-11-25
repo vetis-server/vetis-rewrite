@@ -1,6 +1,5 @@
 use cel::Context;
 use compact_str::ToCompactString;
-
 use http::Uri;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -8,7 +7,7 @@ use std::str::FromStr;
 use vetis::{
     Request, Response, Str, VetisFutureResult, VetisHook, VetisResult,
     errors::VetisError,
-    hook::{Hook, HookPhase, HookPhases},
+    hook::{Hook, HookPhase},
     matcher::{Matcher, MatcherConfig},
 };
 
@@ -26,7 +25,7 @@ impl<'a> HookConfigBuilder<'a> {
     /// # Returns
     ///
     /// * `Self` - The builder.
-    pub fn add_matcher<M>(mut self, matcher: M) -> Self
+    pub fn matcher<M>(mut self, matcher: M) -> Self
     where
         M: MatcherConfig + Send + Sync + 'static,
     {
@@ -168,9 +167,8 @@ impl HookConfig {
 /// HookReplaceHook allow replace uri
 pub struct HookReplaceHook {
     matcher: Option<Box<dyn Matcher>>,
-    target: Regex,
-    replacement: Str,
-    limit: usize,
+    target: Option<Regex>,
+    config: HookConfig,
 }
 
 unsafe impl Send for HookReplaceHook {}
@@ -179,30 +177,32 @@ unsafe impl Sync for HookReplaceHook {}
 impl HookReplaceHook {
     /// Build a new RegexHook out of its configuration
     pub fn new(config: HookConfig) -> Self {
-        let target = Regex::new(&config.target).expect("Invalid target regex pattern");
-        let matcher = if let Some(matcher_config) = config.matcher {
-            Some(matcher_config.boxed_matcher())
-        } else {
-            None
-        };
-        Self {
-            matcher,
-            target,
-            replacement: config.replacement,
-            limit: config
-                .limit
-                .unwrap_or(1 as usize),
-        }
+        Self { matcher: None, target: None, config }
     }
 }
 
 impl Hook for HookReplaceHook {
+    fn setup<'a>(&'a mut self) -> VetisFutureResult<'a, ()> {
+        Box::pin(async move {
+            let target = Regex::new(&self.config.target)
+                .map_err(|e| VetisError::hook(e.to_compact_string()))?;
+            let matcher = if let Some(matcher_config) = &self.config.matcher {
+                Some(matcher_config.boxed_matcher())
+            } else {
+                None
+            };
+            self.target = Some(target);
+            self.matcher = matcher;
+            Ok(())
+        })
+    }
+
     fn has_matches(&self, context: &Context) -> bool {
         if let Some(matcher) = &self.matcher { matcher.is_match(context) } else { true }
     }
 
-    fn phases(&self) -> HookPhases {
-        HookPhases::new(HookPhase::Rewrite)
+    fn phase(&self) -> HookPhase {
+        HookPhase::Rewrite
     }
 
     fn matcher_mut(&mut self) -> Option<&mut Box<dyn Matcher>> {
@@ -218,17 +218,24 @@ impl Hook for HookReplaceHook {
         let future = async move {
             let source_uri = request.uri_mut();
 
-            let replacement_uri = self
-                .replacement
-                .clone();
+            let replacement_uri = &self
+                .config
+                .replacement;
 
-            let replaced_uri = self
-                .target
-                .replacen(&source_uri.to_string(), self.limit, replacement_uri.to_string())
-                .to_string();
+            if let Some(target) = &self.target {
+                let replaced_uri = target
+                    .replacen(
+                        &source_uri.to_string(),
+                        self.config
+                            .limit
+                            .unwrap_or(1),
+                        replacement_uri.to_string(),
+                    )
+                    .to_string();
 
-            *source_uri = Uri::from_str(&replaced_uri)
-                .map_err(|e| VetisError::hook(e.to_compact_string()))?;
+                *source_uri = Uri::from_str(&replaced_uri)
+                    .map_err(|e| VetisError::hook(e.to_compact_string()))?;
+            }
 
             Ok((request, response))
         };

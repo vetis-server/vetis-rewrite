@@ -1,10 +1,9 @@
 use cel::Context;
 use compact_str::ToCompactString;
-
 use serde::{Deserialize, Serialize};
 use vetis::{
     Request, Response, Str, VetisFutureResult, VetisHook, VetisResult,
-    hook::{Hook, HookPhase, HookPhases},
+    hook::{Hook, HookPhase},
     matcher::{Matcher, MatcherConfig},
 };
 
@@ -143,22 +142,29 @@ unsafe impl Sync for ReqHeaderHook {}
 impl ReqHeaderHook {
     /// Build a new RegexHook out of its configuration
     pub fn new(config: HookConfig) -> Self {
-        let matcher = if let Some(matcher_config) = &config.matcher {
-            Some(matcher_config.boxed_matcher())
-        } else {
-            None
-        };
-        Self { matcher, config }
+        Self { matcher: None, config }
     }
 }
 
 impl Hook for ReqHeaderHook {
+    fn setup<'a>(&'a mut self) -> VetisFutureResult<'a, ()> {
+        Box::pin(async move {
+            let matcher = if let Some(matcher_config) = &self.config.matcher {
+                Some(matcher_config.boxed_matcher())
+            } else {
+                None
+            };
+            self.matcher = matcher;
+            Ok(())
+        })
+    }
+
     fn has_matches(&self, context: &Context) -> bool {
         if let Some(matcher) = &self.matcher { matcher.is_match(context) } else { true }
     }
 
-    fn phases(&self) -> HookPhases {
-        HookPhases::new(HookPhase::Rewrite)
+    fn phase(&self) -> HookPhase {
+        HookPhase::Rewrite
     }
 
     fn matcher_mut(&mut self) -> Option<&mut Box<dyn Matcher>> {

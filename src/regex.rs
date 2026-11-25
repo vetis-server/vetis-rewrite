@@ -7,7 +7,7 @@ use std::str::FromStr;
 use vetis::{
     Request, Response, Str, VetisFutureResult, VetisHook, VetisResult,
     errors::VetisError,
-    hook::{Hook, HookPhase, HookPhases},
+    hook::{Hook, HookPhase},
     matcher::{Matcher, MatcherConfig},
 };
 
@@ -24,7 +24,7 @@ impl<'a> HookConfigBuilder<'a> {
     /// # Returns
     ///
     /// * `Self` - The builder.
-    pub fn add_matcher<M>(mut self, matcher: M) -> Self
+    pub fn matcher<M>(mut self, matcher: M) -> Self
     where
         M: MatcherConfig + Send + Sync + 'static,
     {
@@ -145,8 +145,8 @@ impl HookConfig {
 /// RegexHook allow rewrite uri using regex
 pub struct RegexHook {
     matcher: Option<Box<dyn Matcher>>,
-    target: Regex,
-    replacement: Str,
+    target: Option<Regex>,
+    config: HookConfig,
 }
 
 unsafe impl Send for RegexHook {}
@@ -155,23 +155,33 @@ unsafe impl Sync for RegexHook {}
 impl RegexHook {
     /// Build a new RegexHook out of its configuration
     pub fn new(config: HookConfig) -> Self {
-        let target = Regex::new(&config.target).expect("Invalid target regex pattern");
-        let matcher = if let Some(matcher_config) = config.matcher {
-            Some(matcher_config.boxed_matcher())
-        } else {
-            None
-        };
-        Self { matcher, target, replacement: config.replacement }
+        Self { matcher: None, target: None, config }
     }
 }
 
 impl Hook for RegexHook {
+    fn setup<'a>(&'a mut self) -> VetisFutureResult<'a, ()> {
+        Box::pin(async move {
+            let target = Regex::new(&self.config.target)
+                .map_err(|e| VetisError::hook(e.to_compact_string()))?;
+
+            let matcher = if let Some(matcher_config) = &self.config.matcher {
+                Some(matcher_config.boxed_matcher())
+            } else {
+                None
+            };
+            self.target = Some(target);
+            self.matcher = matcher;
+            Ok(())
+        })
+    }
+
     fn has_matches(&self, context: &Context) -> bool {
         if let Some(matcher) = &self.matcher { matcher.is_match(context) } else { true }
     }
 
-    fn phases(&self) -> HookPhases {
-        HookPhases::new(HookPhase::Rewrite)
+    fn phase(&self) -> HookPhase {
+        HookPhase::Rewrite
     }
 
     fn matcher_mut(&mut self) -> Option<&mut Box<dyn Matcher>> {
@@ -187,18 +197,18 @@ impl Hook for RegexHook {
         let future = async move {
             let source_uri = request.uri_mut();
 
-            let target_uri = self
-                .replacement
-                .clone();
+            let target_uri = &self
+                .config
+                .replacement;
 
-            let replaced_uri = self
-                .target
-                .replace_all(&source_uri.to_string(), target_uri.to_string())
-                .to_string();
+            if let Some(target) = &self.target {
+                let replaced_uri = target
+                    .replace_all(&source_uri.to_string(), target_uri.to_string())
+                    .to_string();
 
-            *source_uri = Uri::from_str(&replaced_uri)
-                .map_err(|e| VetisError::hook(e.to_compact_string()))?;
-
+                *source_uri = Uri::from_str(&replaced_uri)
+                    .map_err(|e| VetisError::hook(e.to_compact_string()))?;
+            }
             Ok((request, response))
         };
 
